@@ -257,7 +257,7 @@ HORILLA_V2_PYTHON=/path/to/horilla-hr/.venv/bin/python \
 See `tests/README.md` for the environment variables and what each module covers.
 
 CI runs the same suite on every push, and weekly against Horilla v2's
-`dev/v2.0`. The weekly run is the point: v2 moves independently of this tool, so
+`2.0`. The weekly run is the point: v2 moves independently of this tool, so
 a green run today says nothing about tomorrow — most sharply for the migration
 ordering that the holiday data copy depends on, which would break silently.
 

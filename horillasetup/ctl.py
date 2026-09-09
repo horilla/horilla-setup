@@ -23,7 +23,12 @@ HORILLA_REPOS = {
     },
     "hrms-v2": {
         "url": "https://github.com/horilla-opensource/horilla.git",
-        "branch": "dev/v2.0",
+        # Stable, not dev/v2.0. This branch is what a released version is cut
+        # from; dev/v2.0 is where work lands first and can carry migrations and
+        # schema changes that no release has shipped yet. Installing from it
+        # gave customers a checkout ahead of every published version, which is
+        # not something a setup tool should hand anyone by default.
+        "branch": "2.0",
     },
     "crm": {
         "url": "https://github.com/horilla-opensource/horilla-crm",
@@ -237,6 +242,37 @@ def upgrade_project(version_key):
         print(f"⚠️  No existing {version_key} project found.")
         print(f"👉  Use 'horillasetup build {version_key}' first.")
         sys.exit(1)
+
+    target_branch = HORILLA_REPOS.get(version_key, {}).get("branch")
+    if target_branch:
+        # A bare `git pull` follows whatever branch the checkout already tracks.
+        # Installs built before this tool switched to the stable branch are on
+        # dev/v2.0, and would keep pulling the development branch indefinitely --
+        # the checkout silently stays ahead of every released version. Move it
+        # once, and only when there is nothing local to lose.
+        current = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        if current and current != target_branch:
+            dirty = subprocess.run(
+                ["git", "status", "--porcelain"], capture_output=True, text=True
+            ).stdout.strip()
+            if dirty:
+                print(
+                    f"⚠️  This checkout is on '{current}', but {version_key} now "
+                    f"tracks '{target_branch}'."
+                )
+                print("    There are uncommitted changes, so it was left alone.")
+                print(f"    Commit or stash them, then: git checkout {target_branch}")
+                sys.exit(1)
+            print(f"🔀 Switching from '{current}' to '{target_branch}'...")
+            try:
+                subprocess.run(["git", "fetch", "origin", target_branch], check=True)
+                subprocess.run(["git", "checkout", target_branch], check=True)
+            except subprocess.CalledProcessError:
+                print(f"❌ Could not switch to '{target_branch}'.")
+                sys.exit(1)
 
     print(f"🔄 Pulling latest updates from {version_key} branch...")
     try:
