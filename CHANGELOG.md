@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Fixed: a stage failure blamed the stage, not the actual error
+
+Every stage runs a probe script inside the project, and any failure was
+reported as a problem with what that stage was doing. A customer migration died
+because Django could not start at all, and the tool said:
+
+    MigrationError: could not inspect the database:
+    OM "horilla_l...
+
+Both halves misled. The database was never reached -- an emoji in a warning
+that a Windows cp1252 console could not encode killed `django.setup()`. And the
+tail was sliced by character mid-token: `OM "horilla_l` is the end of
+`FROM "horilla_ldap_ldapsettings"`. The operator went looking at their data,
+which was fine.
+
+Failures are now attributed. A crash during Django startup says so, and says
+that nothing has been changed. Output is trimmed by line rather than by
+character, so the error stays readable. A `UnicodeEncodeError` -- which is
+cosmetic on Linux and fatal on Windows -- carries the `PYTHONUTF8=1` fix.
+
+A genuine database error is still reported plainly, with no invented startup
+explanation.
+
 ## 1.1.3
 
 ### Changed: `hrms-v2` installs from `2.0`, not `dev/v2.0`

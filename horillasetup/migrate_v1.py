@@ -94,6 +94,54 @@ def _emit(result) -> dict:
     return data
 
 
+def _stage_failure(result, what: str) -> str:
+    """Explain why a stage's probe script failed, without guessing.
+
+    Every stage runs a snippet inside the project, and every failure used to be
+    reported as a problem with the thing the stage was doing -- "could not
+    inspect the database" even when the database was never reached. A customer
+    migration failed because Django could not start at all, and the operator
+    was sent looking at their data.
+
+    stderr was also sliced by character (`[-1500:]`), which cut mid-token: the
+    report we received read `OM "horilla_l...`, the tail of
+    `FROM "horilla_ldap_ldapsettings"`. Slice by line instead so the message
+    stays readable.
+    """
+    stderr = (result.stderr or "").rstrip()
+    tail = "\n".join(stderr.splitlines()[-40:])
+
+    # The probe never got as far as its own body, so `what` is the wrong thing
+    # to blame. Say where it actually died.
+    startup_markers = (
+        "django.setup()",
+        "apps.populate",
+        "AppConfig.ready",
+        "ImproperlyConfigured",
+        "ModuleNotFoundError",
+    )
+    if any(marker in stderr for marker in startup_markers):
+        lead = (
+            f"{what} -- but the failure happened while Django was starting up, "
+            "before the database was reached. Fix the startup error below and "
+            "re-run; nothing has been changed."
+        )
+    else:
+        lead = what
+
+    hint = ""
+    if "UnicodeEncodeError" in stderr:
+        hint = (
+            "\n\nThis is a console encoding failure: something printed a "
+            "character your terminal cannot represent, which on Windows is "
+            "fatal rather than cosmetic. Re-run with UTF-8 forced:\n"
+            "    PowerShell:  $env:PYTHONUTF8=1\n"
+            "    cmd.exe:     set PYTHONUTF8=1"
+        )
+
+    return f"{lead}\n{tail}{hint}"
+
+
 # --- stage 1 ---------------------------------------------------------------
 
 def fingerprint(project: Path) -> dict:
@@ -114,7 +162,7 @@ print("::detail", fp.describe())
 """)
     if result.returncode != 0:
         raise MigrationError(
-            f"could not inspect the database:\n{result.stderr[-1500:]}"
+            _stage_failure(result, "could not inspect the database")
         )
     return _emit(result)
 
@@ -134,7 +182,7 @@ for problem in preflight(connection):
     print("::problem", problem)
 """)
     if result.returncode != 0:
-        raise MigrationError(f"pre-flight failed:\n{result.stderr[-1500:]}")
+        raise MigrationError(_stage_failure(result, "pre-flight failed"))
     return [line[len("::problem "):] for line in result.stdout.splitlines()
             if line.startswith("::problem ")]
 
@@ -162,7 +210,7 @@ print("::port", db.get("PORT") or "5432")
 print("::password", db.get("PASSWORD") or "")
 """)
     if result.returncode != 0:
-        raise MigrationError(f"could not read database settings:\n{result.stderr[-1500:]}")
+        raise MigrationError(_stage_failure(result, "could not read database settings"))
     conf = _emit(result)
 
     if not conf.get("name"):
@@ -185,7 +233,7 @@ print("::password", db.get("PASSWORD") or "")
     if dump.returncode != 0:
         raise MigrationError(
             "pg_dump failed, so the migration cannot be undone -- refusing to "
-            f"continue:\n{dump.stderr[-1500:]}"
+            + _stage_failure(dump, "continue")
         )
     if not target.exists() or target.stat().st_size == 0:
         raise MigrationError(f"backup at {target} is empty")
@@ -219,7 +267,7 @@ print("::ordering", len(clear_auth_ordering_conflicts(connection)))
 print("::sequences", len(resync_sequences(connection)))
 """)
     if result.returncode != 0:
-        raise MigrationError(f"ledger reconciliation failed:\n{result.stderr[-1500:]}")
+        raise MigrationError(_stage_failure(result, "ledger reconciliation failed"))
     return _emit(result)
 
 
@@ -327,7 +375,7 @@ def copy_leave_data(project: Path) -> dict:
         company_leave_key=_NATURAL_KEYS["base_companyleaves"],
     ), adopt=True)
     if result.returncode != 0:
-        raise MigrationError(f"could not copy leave data:\n{result.stderr[-1500:]}")
+        raise MigrationError(_stage_failure(result, "could not copy leave data"))
     return _emit(result)
 
 
@@ -403,7 +451,7 @@ with connection.cursor() as c:
         "from base_companyleaves) d"))
 """)
     if result.returncode != 0:
-        raise MigrationError(f"verification could not run:\n{result.stderr[-1500:]}")
+        raise MigrationError(_stage_failure(result, "verification could not run"))
     after = _emit(result)
 
     problems = []
@@ -492,7 +540,7 @@ with connection.cursor() as c:
         + " union all ".join(leave_sources) + ") u) d"))
 """)
     if result.returncode != 0:
-        raise MigrationError(f"could not read the database:\n{result.stderr[-1500:]}")
+        raise MigrationError(_stage_failure(result, "could not read the database"))
     return _emit(result)
 
 
