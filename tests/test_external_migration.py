@@ -137,15 +137,15 @@ def test_v2_checkout_is_unmodified():
     commit would leave the tree clean while still not being upstream -- which
     is exactly how an earlier verification of this approach fooled me.
     """
-    subprocess.run(["git", "fetch", "-q", "origin", "dev/v2.0"],
+    subprocess.run(["git", "fetch", "-q", "origin", "2.0"],
                    cwd=V2_ROOT, capture_output=True)
     diff = subprocess.run(
-        ["git", "diff", "--stat", "origin/dev/v2.0", "--",
+        ["git", "diff", "--stat", "origin/2.0", "--",
          "horilla_auth/", "horilla/settings/", "base/migrations/"],
         cwd=V2_ROOT, capture_output=True, text=True,
     )
     assert diff.stdout.strip() == "", (
-        "the v2 checkout differs from origin/dev/v2.0, so this suite is not "
+        "the v2 checkout differs from origin/2.0, so this suite is not "
         f"testing upstream:\n{diff.stdout}"
     )
 

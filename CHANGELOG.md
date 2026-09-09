@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Changed: `hrms-v2` installs from `2.0`, not `dev/v2.0`
+
+`horillasetup build hrms-v2` cloned the development branch. That is where work
+lands first and can carry migrations and schema changes no release has shipped,
+so every install was a checkout ahead of every published version -- not
+something a setup tool should hand anyone by default. It now clones `2.0`, the
+branch releases are cut from.
+
+Changing the clone alone would have fixed only new installs. `upgrade` runs a
+bare `git pull`, which follows whatever branch the checkout already tracks, so
+existing installs would have stayed on `dev/v2.0` indefinitely. `upgrade` now
+moves a checkout to the configured branch first -- and refuses, leaving the tree
+untouched, when there are uncommitted changes, rather than switching branches
+under someone's work.
+
+CI migrates into `2.0` for the same reason: testing the migration against a
+branch users are not on proves the wrong thing. The weekly schedule still
+catches upstream drift.
+
 ## 1.1.2
 
 ### Fixed: three uniqueness rules were missing from the pre-flight check

@@ -77,4 +77,4 @@ rewritten in Phases 1–2 to expect the renamed tables. A test asserting the old
 design passing today would mean the checkout is contaminated — which is worth
 stating plainly, because it already happened once: an early verification run
 was invalid because the checkout still carried the abandoned `db_table` change.
-Always confirm `git diff origin/dev/v2.0` is empty before trusting a green run.
+Always confirm `git diff origin/2.0` is empty before trusting a green run.
