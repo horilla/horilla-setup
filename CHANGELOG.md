@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.3
 
 ### Changed: `hrms-v2` installs from `2.0`, not `dev/v2.0`
 
