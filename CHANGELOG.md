@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.4
 
 ### Fixed: a stage failure blamed the stage, not the actual error
 
