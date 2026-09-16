@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.1.5
+
+### Fixed: an adopted table kept whatever v1 gave it, and nothing else
+
+A customer's upgrade reported success. Days later the dashboard failed for
+non-admin users -- whoever first hit a query that touched the column:
+
+    ProgrammingError: column project_project.company_id_id does not exist
+
+Adoption is what lets v2's `0001_initial` run over a database that already has
+the tables: it returned before Django's `create_model` rather than letting the
+CREATE TABLE fail. But that statement carries more than the table. It carries
+every column, the indexes for those columns, and -- at the end of Django's own
+`create_model` -- the join table for each auto-created many-to-many field.
+
+Returning early skipped all of it. A column v2 introduced on a table v1 already
+had was never created, while `django_migrations` recorded the migration as
+applied. The database looked migrated and could not serve a page.
+
+An adopted table is now reconciled against the model. Missing columns go
+through Django's own `add_field`, so each arrives with the constraints, foreign
+key and index Django would have given it, and auto-created join tables are
+built rather than skipped.
+
+A NOT NULL column with no usable default cannot be added to a table that
+already has rows. Guessing a value would be inventing customer data, and
+carrying on would leave exactly the half-built table this change prevents, so
+that case stops with a message naming the table, the column and the decision
+the operator has to make.
+
+Stage 6 now also compares every column Django expects against
+`information_schema` and reports what is absent. Reconciliation should leave it
+with nothing to find; it exists because the failure being fixed is silence -- a
+migration that reports success over a database that cannot serve a page. If
+anything still slips through, the tool says so while the operator is watching.
+
+**This does not repair databases already migrated by an earlier version.** A
+migration run before 1.1.5 can still be carrying columns that were never
+created. The stage 6 check reports them on a re-run, and the columns it names
+have to be added deliberately.
+
 ## 1.1.4
 
 ### Fixed: a stage failure blamed the stage, not the actual error
