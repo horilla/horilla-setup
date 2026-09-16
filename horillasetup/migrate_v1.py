@@ -449,6 +449,36 @@ with connection.cursor() as c:
     print("::company_leaves", scalar(
         "select count(*) from (select distinct based_on_week, based_on_week_day "
         "from base_companyleaves) d"))
+
+# Every column Django expects, against what the database actually has. A
+# migration that adopted a v1 table used to skip that table's CREATE TABLE
+# whole, so a column v2 introduced on a pre-existing table was never created
+# while the migration recorded itself as applied -- surfacing later as
+# "column project_project.company_id_id does not exist" on a page load.
+# Checked here so the tool reports it now rather than the customer finding it.
+from django.apps import apps
+with connection.cursor() as c:
+    c.execute(
+        "select table_name, column_name from information_schema.columns "
+        "where table_schema = 'public'"
+    )
+    present = {}
+    for table, column in c.fetchall():
+        present.setdefault(table, set()).add(column)
+
+drift = []
+for model in apps.get_models():
+    meta = model._meta
+    if meta.proxy or not meta.managed:
+        continue
+    if meta.db_table not in present:
+        drift.append(meta.db_table)
+        continue
+    for field in meta.local_fields:
+        column = getattr(field, "column", None)
+        if column and column not in present[meta.db_table]:
+            drift.append(f"{meta.db_table}.{column}")
+print("::drift", "|".join(sorted(drift)))
 """)
     if result.returncode != 0:
         raise MigrationError(_stage_failure(result, "verification could not run"))
@@ -467,6 +497,15 @@ with connection.cursor() as c:
     if int(after.get("stale_fks", 0)):
         problems.append(
             f"{after['stale_fks']} foreign key(s) still point at auth_user"
+        )
+    drift = [d for d in (after.get("drift") or "").split("|") if d]
+    if drift:
+        shown = ", ".join(drift[:8])
+        more = f" (and {len(drift) - 8} more)" if len(drift) > 8 else ""
+        problems.append(
+            f"{len(drift)} table(s)/column(s) the code expects are not in the "
+            f"database: {shown}{more}. Pages that read them will fail with "
+            "ProgrammingError."
         )
     if before.get("hashes") and after.get("hashes") != before.get("hashes"):
         problems.append(

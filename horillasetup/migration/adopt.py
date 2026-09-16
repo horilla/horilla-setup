@@ -108,6 +108,68 @@ def _is_subtractive_ddl(statement: str) -> bool:
     return False
 
 
+def _reconcile_existing_table(editor, model):
+    """Add what v1's copy of an adopted table does not already have.
+
+    Adopting a table means skipping its CREATE TABLE, and that statement
+    carries more than the table: every column, the indexes for those columns,
+    and -- at the end of Django's own create_model -- the join table for each
+    auto-created many-to-many field. Returning early skipped all of it, so any
+    column v2 introduced on a table v1 already had was never created, while
+    django_migrations recorded the migration as applied. Nothing failed until
+    a query touched the column:
+
+        ProgrammingError: column project_project.company_id_id does not exist
+
+    reported from a real customer upgrade, on a dashboard page, days after a
+    migration that reported success.
+
+    Django's own add_field is used rather than hand-built DDL, so the column
+    arrives with the constraints, foreign key and index Django would have
+    given it.
+    """
+    table = model._meta.db_table
+    with editor.connection.cursor() as cursor:
+        existing = {
+            column.name
+            for column in editor.connection.introspection.get_table_description(
+                cursor, table
+            )
+        }
+
+    for field in model._meta.local_fields:
+        column = getattr(field, "column", None)
+        if not column or column in existing:
+            continue
+        logger.warning(
+            "adopted table %s is missing column %s -- adding it", table, column
+        )
+        try:
+            editor.add_field(model, field)
+        except Exception as exc:
+            # A NOT NULL column with no usable default cannot be added to a
+            # table that already has rows, and guessing a value here would be
+            # inventing customer data. Stop with something the operator can
+            # act on rather than leaving a half-built table behind.
+            raise RuntimeError(
+                f"Cannot add the missing column {table}.{column} "
+                f"({model._meta.label}.{field.name}): {exc}. "
+                "It is NOT NULL with no default and the table already has "
+                "rows, so a value has to be chosen deliberately. Add the "
+                "column by hand with the default that is right for this "
+                "data, then run the migration again."
+            ) from exc
+
+    # Join tables are separate relations and are created at the end of
+    # Django's create_model, which the early return above skips. Recursing
+    # through the patched create_model adopts one that already exists and
+    # builds one that does not.
+    for field in model._meta.local_many_to_many:
+        through = field.remote_field.through
+        if through._meta.auto_created:
+            editor.create_model(through)
+
+
 def install():
     """Patch BaseDatabaseSchemaEditor.create_model to skip existing tables.
 
@@ -138,6 +200,7 @@ def install():
             # because state is tracked separately from the physical schema --
             # which is the whole point.
             logger.info("adopting existing table %s", table)
+            _reconcile_existing_table(self, model)
             return
         return original_create_model(self, model)
 
