@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Fixed: pre-flight missed duplicate payslips
+
+v2 enforces `unique_payslip_per_employee_period` on
+`payroll_payslip (employee_id, start_date, end_date)`. It was not in the
+pre-flight list, so two identical draft payslips passed pre-flight and then
+failed stage 5 while building the index. It is now checked.
+
+A sweep of every v2 `unique_together` / `UniqueConstraint` against 1.6.1 found
+no other constraint on a table that already exists in v1 and was missing.
+
+### Changed: accept an untagged build between 1.4.x and 1.5.0
+
+A database with the 1.5 attendance columns (`approved_by_id`) but a Google
+Drive backup table still in the pre-1.5 shape was refused as "unrecognised
+schema". It is now classified as 1.5+, with a note, when that table has no
+OAuth columns and no rows -- `horilla_backup/0002` converts it either way, so
+nothing can be lost. Any other mixed shape is still refused.
+
 ## 1.1.5
 
 ### Fixed: an adopted table kept whatever v1 gave it, and nothing else

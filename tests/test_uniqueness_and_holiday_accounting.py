@@ -152,3 +152,19 @@ def test_a_correct_copy_reports_no_loss(holiday_tables):
     before = _scalar(holiday_tables, BEFORE_SQL)
     after = _scalar(holiday_tables, AFTER_SQL)
     assert before - after == 0, "a correct copy must not be reported as a loss"
+
+
+def test_duplicate_payslip_period_is_reported(pg_connection):
+    """unique_payslip_per_employee_period (discussion #1127)."""
+    with pg_connection.cursor() as cur:
+        cur.execute(
+            "create table payroll_payslip (id serial primary key, "
+            "employee_id_id int, start_date date, end_date date)"
+        )
+        cur.execute(
+            "insert into payroll_payslip (employee_id_id, start_date, end_date) "
+            "values (1,'2026-05-01','2026-05-31'),(1,'2026-05-01','2026-05-31'),"
+            "(2,'2026-05-01','2026-05-31')"
+        )
+    pg_connection.commit()
+    assert any("payroll_payslip" in p for p in preflight(pg_connection))

@@ -155,6 +155,44 @@ def test_half_upgraded_googledrive_table_is_refused(scratch_db):
     assert fp.unexpected_state
 
 
+def _hybrid_db(conn, backup_rows=0):
+    """Minimal v1 shape: 1.5 attendance columns, pre-1.5 Google Drive table."""
+    from horillasetup.migration.fingerprint import V1_MARKER_TABLES
+    with conn.cursor() as cur:
+        for table in V1_MARKER_TABLES:
+            cur.execute(f"create table {table} (id serial primary key)")
+        for table in ("attendance_attendance", "attendance_historicalattendance"):
+            if table == "attendance_historicalattendance":
+                cur.execute(f"create table {table} (id serial primary key)")
+            cur.execute(f"alter table {table} add column approved_by_id int")
+        cur.execute(
+            "create table horilla_backup_googledrivebackup "
+            "(id serial primary key, service_account_file varchar(100))"
+        )
+        for _ in range(backup_rows):
+            cur.execute(
+                "insert into horilla_backup_googledrivebackup "
+                "(service_account_file) values ('x')"
+            )
+    conn.commit()
+
+
+def test_empty_pre15_backup_table_with_15_attendance_is_accepted(scratch_db):
+    """Untagged master build between 1.4.x and 1.5.0 (discussion #1127)."""
+    with connect(scratch_db) as conn:
+        _hybrid_db(conn)
+        fp = fingerprint(conn)
+    assert fp.variant == VARIANT_15_PLUS
+    assert any("treated as 1.5+" in m for m in fp.unexpected_state)
+
+
+def test_hybrid_with_backup_rows_is_still_refused(scratch_db):
+    with connect(scratch_db) as conn:
+        _hybrid_db(conn, backup_rows=1)
+        fp = fingerprint(conn)
+    assert not fp.supported
+
+
 # --- pre-flight blocking --------------------------------------------------
 
 def test_duplicate_company_setting_blocks_migration(scratch_db):
