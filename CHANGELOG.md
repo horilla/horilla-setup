@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.6
 
 ### Fixed: pre-flight missed duplicate payslips
 
