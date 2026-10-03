@@ -123,6 +123,22 @@ def _columns(connection) -> set:
         return {(row[0], row[1]) for row in cur.fetchall()}
 
 
+def _is_empty_pre15_backup_leftover(connection, columns) -> bool:
+    """True for the one hybrid we accept: 1.5 attendance columns, but a Google
+    Drive table that is wholly pre-1.5 (no OAuth columns) and has no rows, so
+    converting it cannot lose anything."""
+    attendance_15 = {
+        ("attendance_attendance", "approved_by_id"),
+        ("attendance_historicalattendance", "approved_by_id"),
+    }
+    oauth = {c for c in POST_15_COLUMNS if c[0] == "horilla_backup_googledrivebackup"}
+    if not attendance_15 <= columns or oauth & columns:
+        return False
+    with connection.cursor() as cur:
+        cur.execute("select count(*) from horilla_backup_googledrivebackup")
+        return cur.fetchone()[0] == 0
+
+
 def fingerprint(connection) -> Fingerprint:
     """Classify the connected database.
 
@@ -145,7 +161,20 @@ def fingerprint(connection) -> Fingerprint:
     has_post15 = bool(POST_15_COLUMNS & columns)
     has_pre15 = bool(PRE_15_COLUMNS & columns)
 
-    if has_post15 and not has_pre15:
+    hybrid_note = None
+    if has_post15 and has_pre15 and _is_empty_pre15_backup_leftover(
+        connection, columns
+    ):
+        # An untagged master build between 1.4.x and 1.5.0: it has the 1.5
+        # attendance columns but its (empty) Google Drive table was never
+        # converted. horilla_backup/0002 handles that table either way, so
+        # classify by the attendance columns instead of refusing.
+        variant = VARIANT_15_PLUS
+        hybrid_note = (
+            "horilla_backup_googledrivebackup is still in the pre-1.5 shape "
+            "(empty); treated as 1.5+ -- the migration converts that table"
+        )
+    elif has_post15 and not has_pre15:
         variant = VARIANT_15_PLUS
     elif has_pre15 and not has_post15:
         variant = VARIANT_PRE_15
@@ -163,6 +192,8 @@ def fingerprint(connection) -> Fingerprint:
         )
 
     fp = Fingerprint(variant=variant, table_count=count)
+    if hybrid_note:
+        fp.unexpected_state.append(hybrid_note)
     if count != V1_TABLE_COUNT:
         # Not fatal: a customer may legitimately have extra tables from a
         # plugin. Recorded so the operator sees it before proceeding.
@@ -194,6 +225,8 @@ V2_UNIQUENESS = [
      "more than one work record for the same employee on the same date"),
     ("attendance_attendance", ["employee_id", "attendance_date"],
      "more than one attendance row for the same employee on the same date"),
+    ("payroll_payslip", ["employee_id", "start_date", "end_date"],
+     "more than one payslip for the same employee and period"),
     ("attendance_attendanceovertime", ["employee_id", "month", "year"],
      "more than one overtime row for the same employee in the same month"),
     ("attendance_attendancelatecomeearlyout", ["attendance_id", "type"],
